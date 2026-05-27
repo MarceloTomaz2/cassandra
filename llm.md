@@ -42,8 +42,6 @@ graph TD
     *   `live_client.js`: Captures browser microphone feed and schedules incoming raw PCM audio playbacks.
     *   `style.css`: Clean, dark UI styles.
     *   `ai_studio.js`: Standalone legacy helper for HTTP fallback.
-*   **`server.py`**: Standalone secondary Python HTTP proxy utilizing Gemini Pro HTTP API. Has a custom built-in native `.env` parser.
-*   **`ai_studio_code.py`**: Standalone experimental Python terminal agent utilizing the Multimodal Live API (`google-genai` SDK).
 
 ---
 
@@ -74,7 +72,6 @@ GEMINI_API_KEY=AIzaSy...              # Google AI Studio API Key
 
 # Server Ports
 PORT=8080                             # Go WebSocket Server port
-PYTHON_SERVER_PORT=8000               # Python Proxy Server port
 
 # Face Tracking
 TRACKER_STREAM_URL=0                  # '0' for local webcam, or HTTP URL for IP camera
@@ -130,7 +127,7 @@ Sends real-time face coordinates:
 
 ## 📝 Guidelines for future AI Agents / LLMs
 
-1.  **Maintain Environment Isolation**: If you add any configuration variables, declare them in `.env.example`, document them in `README.md`, and fetch them using `os.Getenv` (Go) or `os.environ` (Python).
+1.  **Maintain Environment Isolation**: If you add any configuration variables, declare them in `.env.example`, document them in `README.md`, and fetch them using `os.Getenv` (Go).
 2.  **Preserve Fallback Compilation**: Ensure that any changes to `FaceTracker` or camera routines do not break `tracker_mock.go` compilation. Keep the tag signature `//go:build !gocv` clean.
 3.  **UI Assets Directory**: Static files must strictly live inside `/web` directory. If you create new images or CSS/JS utilities, place them there.
 4.  **Three.js Customisations**: Keep Bender's styling aligned with glassmorphism and modern colors. Coordinate scales should match target ranges:

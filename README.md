@@ -21,17 +21,15 @@ O resultado é um modelo 3D estilizado do icônico robô **Bender** que acompanh
 ```text
 ├── main.go                       # Servidor central em Go (WebSockets, GoCV Tracker e Servidor Estático)
 ├── tracker.go                    # Lógica de processamento de imagem e rastreamento facial (GoCV)
+├── tracker_mock.go               # Fallback mock do FaceTracker para compilação sem GoCV/OpenCV
 ├── web/                          # Diretório contendo os arquivos frontend da aplicação web
 │   ├── index.html                # Interface web do usuário
 │   ├── main.js                   # Lógica de renderização 3D, controle de câmera e eventos Three.js
 │   ├── live_client.js            # Cliente Web Audio e gerador de PCM para a conexão bidirecional
 │   ├── style.css                 # Estilização da interface com foco em design moderno e responsivo
 │   └── ai_studio.js              # Lógica de fallback para chat HTTP
-├── server.py                     # Servidor proxy opcional em Python para chat de fallback (HTTP)
-├── ai_studio_code.py             # Script Python independente de demonstração para a API Live (PyAudio + GenAI)
 ├── haarcascade_frontalface_default.xml # Modelo treinado do OpenCV para detecção de rostos
 ├── .env.example                  # Template das variáveis de ambiente globais
-├── config.ini.example            # Template de configuração para o proxy Python
 └── .gitignore                    # Arquivos ignorados pelo Git
 ```
 
@@ -39,17 +37,10 @@ O resultado é um modelo 3D estilizado do icônico robô **Bender** que acompanh
 
 ## 🛠️ Pré-requisitos
 
-### 1. Go (Golang)
+### Go (Golang)
 *   Recomendado: Go 1.20 ou superior.
-*   Instalação do **GoCV**: Siga as instruções oficiais do [GoCV Roadmap](https://gocv.io/) para instalar o OpenCV em seu sistema operacional (Windows, macOS ou Linux).
-    *   *No Windows*, o GoCV facilita a instalação por meio de scripts que automatizam a compilação do OpenCV.
-
-### 2. Python (Opcional, para rodar scripts adicionais)
-*   Recomendado: Python 3.10 ou superior.
-*   Instale as dependências executando:
-    ```bash
-    pip install google-genai opencv-python pyaudio pillow mss
-    ```
+*   **GoCV / OpenCV (Opcional)**: Para habilitar o rastreamento facial real pela câmera, é necessário instalar as dependências do OpenCV em seu sistema operacional (Windows, macOS ou Linux). Consulte o guia oficial do [GoCV Roadmap](https://gocv.io/).
+*   **Modo de Compatibilidade**: Se você preferir rodar sem instalar OpenCV/GoCV, o projeto funcionará no modo mock nativo (utilizando o movimento do mouse/toque no 3D) de forma imediata!
 
 ---
 
@@ -57,30 +48,19 @@ O resultado é um modelo 3D estilizado do icônico robô **Bender** que acompanh
 
 1.  **Clone o Repositório**:
     ```bash
-    git clone https://github.com/seu-usuario/cassandra.git
+    git clone https://github.com/MarceloTomaz2/cassandra.git
     cd cassandra
     ```
 
-2.  **Configure as Variáveis de Ambiente (Go / Frontend)**:
+2.  **Configure as Variáveis de Ambiente**:
     Copie o arquivo de exemplo `.env.example` para `.env`:
     ```bash
     cp .env.example .env
     ```
-    Abra o `.env` e adicione sua chave do **Google AI Studio (Gemini)**:
+    Abra o `.env` e adicione sua chave ativa do **Google AI Studio (Gemini)** e demais configurações:
     ```env
-    GEMINI_API_KEY=AIzaSy...seu_token_aqui
+    GEMINI_API_KEY=AIzaSy...sua_chave_real
     PORT=8080
-    ```
-
-3.  **Configure o Proxy Python (Opcional)**:
-    Se for utilizar o servidor proxy Python (`server.py`), copie `config.ini.example` para `config.ini`:
-    ```bash
-    cp config.ini.example config.ini
-    ```
-    Insira sua chave de API do Gemini no `config.ini`:
-    ```ini
-    [GEMINI]
-    api_key = sk-...sua_chave_aqui
     ```
 
 ---
@@ -94,14 +74,13 @@ O resultado é um modelo 3D estilizado do icônico robô **Bender** que acompanh
     go mod tidy
     ```
 
-2.  Inicie o servidor Go:
+2.  Inicie o servidor Go no modo padrão (Sem dependência do OpenCV/GoCV):
     ```bash
-    go run main.go tracker.go
+    go run .
     ```
-    *Ou compile o binário localmente:*
+    *Caso possua o OpenCV configurado e queira ativar o rastreamento por câmera real:*
     ```bash
-    go build -o cassandra.exe main.go tracker.go
-    ./cassandra.exe
+    go run -tags gocv .
     ```
 
 3.  Acesse em seu navegador:
