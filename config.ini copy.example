@@ -1,4 +1,0 @@
-[GEMINI]
-base_url = https://llmlite.mftsoft.com.br
-api_key = sua_chave_de_api_aqui
-model = gemini/gemini-3.1-flash-live-preview

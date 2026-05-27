@@ -4,6 +4,10 @@ O **Cassandra** é um projeto interativo em tempo real que une **computação gr
 
 O resultado é um modelo 3D estilizado do icônico robô **Bender** que acompanha fisicamente o movimento do seu rosto e responde a conversas por voz em tempo real, gerando uma experiência de interação imersiva e responsiva.
 
+<p align="center">
+  <img src="web/assets/demo.gif" alt="Cassandra Bender 3D Demo" width="700px" />
+</p>
+
 ---
 
 ## 🚀 Funcionalidades Principais
