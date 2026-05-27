@@ -1,0 +1,138 @@
+# 🤖 LLM context for Project Cassandra
+
+Welcome, AI Assistant! This document serves as a comprehensive system orientation and developer context file. Read this to understand the codebase architecture, files, API contracts, build flags, and developer workflows of **Cassandra**.
+
+---
+
+## 📌 Project Overview
+**Cassandra** is a high-performance, real-time interactive 3D Web application that integrates:
+1.  **3D Graphics & Animations**: A 3D model of the robot **Bender** modeled in vanilla Three.js.
+2.  **Conversational Live Voice (Google Gemini Multimodal Live API)**: Bidirectional, low-latency voice-to-voice communication using WebSockets streaming raw PCM audio chunks.
+3.  **Real-Time Computer Vision & Face Tracking**: A backend Go service that grabs video frames from a camera feed, detects human faces using OpenCV (`CascadeClassifier`), and relays normalised coordinates to Three.js to move Bender's gaze and camera perspective in real-time.
+
+---
+
+## ⚙️ Core Architecture & Data Flow
+
+```mermaid
+graph TD
+    User([User in Browser]) <-->|WebAudio / ws| GoServer[Go Backend Server]
+    GoServer <-->|Bidi WebSockets / PCM| GeminiLive[Gemini Live API]
+    
+    IPCamera[IP Camera / Webcam] -->|Video Feed| GoCVTracker[GoCV/OpenCV Face Tracker]
+    GoCVTracker -->|Normalised Coordinates| GoServer
+    GoServer -->|ws /events| User
+    
+    User -->|Mouse fallback| ThreeJS[Three.js Camera / Eyes Gaze]
+```
+
+1.  **Audio Pipeline**: User clicks "Falar com Bender" -> browser records microphone (PCM 16kHz, 16-bit mono) -> sends Base64 chunks over WebSocket (`/ws`) -> Go server relays to Gemini Live WebSocket (`v1alpha`) -> Gemini responds with PCM (24kHz, 16-bit mono) -> Go server relays to browser -> browser plays audio queue using AudioContext.
+2.  **Tracking Pipeline**: OpenCV processes feed -> calculates normalised center `(x, y)` between `-1.0` and `1.0` -> broadcasts over WebSocket `/events` -> Three.js updates camera position and robot mesh rotation.
+
+---
+
+## 📁 Repository File Mapping
+
+*   **`main.go`**: Core HTTP server, WebSocket upgrader, and gateway routing `/ws` to Gemini and `/events` to the frontend.
+*   **`tracker.go`** (Build Tag `gocv`): Implements `FaceTracker` using native OpenCV bindings (`gocv.io/x/gocv`).
+*   **`tracker_mock.go`** (Build Tag `!gocv`): Fallback mock `FaceTracker` ensuring zero compile-time dependencies on OpenCV for quick local development.
+*   **`web/`**: Dedicated directory containing static frontend assets:
+    *   `index.html`: Entry structure.
+    *   `main.js`: Main Three.js loop, camera physics, robot rendering, mesh blinking logic, and event listeners.
+    *   `live_client.js`: Captures browser microphone feed and schedules incoming raw PCM audio playbacks.
+    *   `style.css`: Clean, dark UI styles.
+    *   `ai_studio.js`: Standalone legacy helper for HTTP fallback.
+*   **`server.py`**: Standalone secondary Python HTTP proxy utilizing Gemini Pro HTTP API. Has a custom built-in native `.env` parser.
+*   **`ai_studio_code.py`**: Standalone experimental Python terminal agent utilizing the Multimodal Live API (`google-genai` SDK).
+
+---
+
+## 🧩 Build Flags & OpenCV Constraints
+
+Because OpenCV and `gocv` setup is complex on Windows/macOS, we utilize **Go Build Tags** to keep compilation simple:
+
+*   **Mock Mode (Default / No Dependencies)**:
+    Compile/run using standard commands. It compiles `main.go` + `tracker_mock.go`:
+    ```bash
+    go run .
+    ```
+*   **Production/GoCV Mode (Requires OpenCV/GoCV installed)**:
+    Compile/run using the `gocv` tag. It compiles `main.go` + `tracker.go`:
+    ```bash
+    go run -tags gocv .
+    ```
+
+---
+
+## 🔑 Environment Variables (`.env`)
+
+All configurations must be loaded exclusively from the environment. Never hardcode credentials or URLs.
+
+```env
+# Credentials
+GEMINI_API_KEY=AIzaSy...              # Google AI Studio API Key
+
+# Server Ports
+PORT=8080                             # Go WebSocket Server port
+PYTHON_SERVER_PORT=8000               # Python Proxy Server port
+
+# Face Tracking
+TRACKER_STREAM_URL=0                  # '0' for local webcam, or HTTP URL for IP camera
+TRACKER_CASCADE_FILE=haarcascade_frontalface_default.xml
+
+# Gemini Live Configuration
+GEMINI_LIVE_URL=wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent
+GEMINI_MODEL=models/gemini-3.1-flash-live-preview
+GEMINI_VOICE_NAME=Puck                 # Voice options: Puck, Charon, Kore, Fenrir, Aoede
+GEMINI_SYSTEM_INSTRUCTION=You are Bender...
+```
+
+---
+
+## 📡 API & WebSocket Protocols
+
+### 1. Client WebSocket to Go Server (`/ws`)
+*   **Upstream (Client -> Server -> Gemini)**:
+    JSON payload sending microphone bytes:
+    ```json
+    {
+      "type": "audio",
+      "data": "Base64EncodedPCM16kHz"
+    }
+    ```
+*   **Downstream (Gemini -> Server -> Client)**:
+    JSON responses with audio output:
+    ```json
+    {
+      "type": "audio",
+      "data": "Base64EncodedPCM24kHz"
+    }
+    ```
+    JSON text responses:
+    ```json
+    {
+      "type": "text",
+      "data": "Robot text transcription"
+    }
+    ```
+
+### 2. Events Broadcast (`/events`)
+Sends real-time face coordinates:
+```json
+{
+  "type": "face",
+  "x": -0.456,
+  "y": 0.123
+}
+```
+
+---
+
+## 📝 Guidelines for future AI Agents / LLMs
+
+1.  **Maintain Environment Isolation**: If you add any configuration variables, declare them in `.env.example`, document them in `README.md`, and fetch them using `os.Getenv` (Go) or `os.environ` (Python).
+2.  **Preserve Fallback Compilation**: Ensure that any changes to `FaceTracker` or camera routines do not break `tracker_mock.go` compilation. Keep the tag signature `//go:build !gocv` clean.
+3.  **UI Assets Directory**: Static files must strictly live inside `/web` directory. If you create new images or CSS/JS utilities, place them there.
+4.  **Three.js Customisations**: Keep Bender's styling aligned with glassmorphism and modern colors. Coordinate scales should match target ranges:
+    *   Horizontal coordinates: `-1.0` (Left) to `1.0` (Right).
+    *   Vertical coordinates: `-1.0` (Bottom) to `1.0` (Top).

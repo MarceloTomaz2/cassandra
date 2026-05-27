@@ -1,0 +1,57 @@
+# Cassandra Gitignore
+
+# Credenciais e Configurações Locais (NUNCA COMMITAR!)
+.env
+config.ini
+
+# Binários Compilados do Go na raiz do projeto
+/cassandra
+/cassandra.exe
+/cassandra-debug
+/cassandra-debug.exe
+
+# Dependências e Cache do Go
+/vendor/
+/go-build/
+*.test
+*.out
+
+# Ambientes Virtuais e Caches de Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.mypy_cache/
+
+# Arquivos de IDEs e Editores
+.vscode/
+.idea/
+*.suo
+*.user
+*.userossc
+*.sln
+*.swp
+*~
+
+# Arquivos de Sistema Operacional
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
