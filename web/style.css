@@ -78,7 +78,24 @@ body, html {
     padding: 2px 8px;
     font-size: 10px;
     font-family: Arial, sans-serif;
-    border-radius: 4px;
-    font-weight: bold;
     letter-spacing: 1px;
+}
+
+#volume-meter {
+    width: 200px;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    margin: 15px auto 5px auto;
+    overflow: hidden;
+    display: none; /* Oculto por padrão, aparece ao ativar */
+    border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+#volume-bar {
+    width: 0%;
+    height: 100%;
+    background: linear-gradient(90deg, #00ffcc, #00ff66);
+    box-shadow: 0 0 10px rgba(0, 255, 204, 0.7);
+    transition: width 0.05s ease-out;
 }

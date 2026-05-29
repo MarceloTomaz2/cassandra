@@ -8,6 +8,8 @@ export class GeminiLiveClient {
         this.onText = null;
         this.onFace = null;
         this.onStatus = null;
+        this.onWakeWord = null;
+        this.onVolumeChange = null;
         this.isPlaying = false;
         this.audioQueue = [];
         this.nextStartTime = 0;
@@ -21,8 +23,10 @@ export class GeminiLiveClient {
                 this.handleAudioResponse(msg.data);
             } else if (msg.type === 'text') {
                 if (this.onText) this.onText(msg.data);
-            } else if (msg.type === 'face') {
-                if (this.onFace) this.onFace(msg.x, msg.y);
+            } else if (msg.type === 'status') {
+                if (this.onStatus) this.onStatus(msg.data);
+            } else if (msg.type === 'wake_word_detected') {
+                if (this.onWakeWord) this.onWakeWord(msg.data);
             }
         };
 
@@ -47,6 +51,18 @@ export class GeminiLiveClient {
 
         this.processor.onaudioprocess = (e) => {
             const inputData = e.inputBuffer.getChannelData(0);
+            
+            // Calcula o volume RMS (Root Mean Square) em tempo real
+            let sum = 0;
+            for (let i = 0; i < inputData.length; i++) {
+                sum += inputData[i] * inputData[i];
+            }
+            let rms = Math.sqrt(sum / inputData.length);
+            let volume = Math.min(100, Math.round(rms * 100 * 5)); // Ganho para boa visibilidade
+            if (this.onVolumeChange) {
+                this.onVolumeChange(volume);
+            }
+
             // Convert to 16-bit PCM
             const pcmData = new Int16Array(inputData.length);
             for (let i = 0; i < inputData.length; i++) {

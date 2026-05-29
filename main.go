@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bufio"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -18,6 +22,11 @@ var upgrader = websocket.Upgrader{
 		return true
 	},
 }
+
+var (
+	wakewordModel     string  = "models/ok_bender.onnx"
+	wakewordThreshold float64 = 0.8
+)
 
 type Hub struct {
 	clients    map[*websocket.Conn]bool
@@ -98,12 +107,25 @@ func main() {
 		fmt.Printf("Sucesso: Chave de API carregada (%d caracteres).\n", len(strings.TrimSpace(apiKey)))
 	}
 
+	// Inicialização da configuração do wake word
+	wakewordModel = os.Getenv("WAKEWORD_MODEL_PATH")
+	if wakewordModel == "" {
+		wakewordModel = "models/edna.onnx"
+	}
+	thresholdStr := os.Getenv("WAKEWORD_THRESHOLD")
+	if thresholdStr != "" {
+		if t, err := strconv.ParseFloat(thresholdStr, 64); err == nil {
+			wakewordThreshold = t
+		}
+	}
+	fmt.Printf("Sucesso: Configuração de wake word carregada. Modelo: %s (limiar: %.2f)\n", wakewordModel, wakewordThreshold)
+
 	hub := newHub()
 	go hub.run()
 
 	streamURL := os.Getenv("TRACKER_STREAM_URL")
 	if streamURL == "" {
-		streamURL = "http://192.168.1.109:81/stream"
+		streamURL = "http://localhost:81/stream"
 	}
 	cascadeFile := os.Getenv("TRACKER_CASCADE_FILE")
 	if cascadeFile == "" {
@@ -204,12 +226,140 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, apiKey string, hub 
 		log.Printf("WebSocket upgrade failed: %v", err)
 		return
 	}
+
+	var (
+		geminiConn     *websocket.Conn
+		isGeminiActive bool
+		mu             sync.Mutex
+	)
+
+	// Inicia o processo Python para detecção de Wake Word em tempo real para esta conexão
+	cmd := exec.Command("python", "wakeword_detector.py", wakewordModel, strconv.FormatFloat(wakewordThreshold, 'f', 2, 64))
+	pythonStdin, err := cmd.StdinPipe()
+	if err != nil {
+		log.Printf("Falha ao criar stdin pipe para o detector de wake word: %v", err)
+		clientConn.Close()
+		return
+	}
+	pythonStdout, err := cmd.StdoutPipe()
+	if err != nil {
+		log.Printf("Falha ao criar stdout pipe para o detector de wake word: %v", err)
+		clientConn.Close()
+		return
+	}
+	if err := cmd.Start(); err != nil {
+		log.Printf("Falha ao iniciar o subprocesso Python de wake word: %v", err)
+		clientConn.Close()
+		return
+	}
+
 	defer func() {
 		hub.unregister <- clientConn
 		clientConn.Close()
-	}()
-	hub.register <- clientConn
+		mu.Lock()
+		if isGeminiActive && geminiConn != nil {
+			geminiConn.Close()
+		}
+		mu.Unlock()
 
+		// Encerra o subprocesso Python com segurança
+		pythonStdin.Close()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		fmt.Println("Conexão WebSocket encerrada. Subprocesso Python finalizado.")
+	}()
+
+	hub.register <- clientConn
+	fmt.Println("Novo cliente conectado! Aguardando palavra de ativação...")
+
+	// Inicia notificando o frontend
+	clientConn.WriteJSON(map[string]string{
+		"type": "status",
+		"data": "Aguardando palavra de ativação...",
+	})
+
+	// Goroutine para ler a saída do detector Python e ativar a conexão Gemini Live
+	go func() {
+		scanner := bufio.NewScanner(pythonStdout)
+		for scanner.Scan() {
+			line := scanner.Text()
+			fmt.Printf("[WakeWord] %s\n", line)
+			if strings.HasPrefix(line, "DETECTED:") {
+				mu.Lock()
+				if !isGeminiActive {
+					fmt.Printf("🔥 WAKEWORD DETECTADA: %s\n", line)
+					// Conecta ao Gemini Live em tempo real
+					gConn, err := dialGemini(apiKey, clientConn, hub, &isGeminiActive, &mu)
+					if err == nil {
+						geminiConn = gConn
+						isGeminiActive = true
+						clientConn.WriteJSON(map[string]string{
+							"type": "status",
+							"data": "Bender Ativado! Conversando...",
+						})
+						clientConn.WriteJSON(map[string]string{
+							"type": "wake_word_detected",
+							"data": "active",
+						})
+					} else {
+						log.Printf("Falha ao conectar ao Gemini pós WakeWord: %v", err)
+					}
+				}
+				mu.Unlock()
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			log.Printf("Erro ao ler do stdout do subprocesso Python: %v", err)
+		}
+	}()
+
+	for {
+		_, message, err := clientConn.ReadMessage()
+		if err != nil {
+			break
+		}
+
+		var clientMsg map[string]string
+		if err := json.Unmarshal(message, &clientMsg); err != nil {
+			continue
+		}
+
+		if clientMsg["type"] == "audio" {
+			audioBytes, err := base64.StdEncoding.DecodeString(clientMsg["data"])
+			if err != nil {
+				continue
+			}
+
+			mu.Lock()
+			if !isGeminiActive {
+				// Envia os bytes PCM brutos de 16kHz mono para o detector Python
+				_, _ = pythonStdin.Write(audioBytes)
+			} else {
+				// Gemini ativo: envia PCM diretamente
+				geminiInput := map[string]interface{}{
+					"realtimeInput": map[string]interface{}{
+						"audio": map[string]interface{}{
+							"data":     clientMsg["data"],
+							"mimeType": "audio/pcm;rate=16000",
+						},
+					},
+				}
+				if err := geminiConn.WriteJSON(geminiInput); err != nil {
+					log.Printf("Falha ao enviar áudio ao Gemini: %v. Revertendo para Escuta Ativa...", err)
+					geminiConn.Close()
+					isGeminiActive = false
+					clientConn.WriteJSON(map[string]string{
+						"type": "status",
+						"data": "Aguardando palavra de ativação...",
+					})
+				}
+			}
+			mu.Unlock()
+		}
+	}
+}
+
+func dialGemini(apiKey string, clientConn *websocket.Conn, hub *Hub, isGeminiActive *bool, mu *sync.Mutex) (*websocket.Conn, error) {
 	liveURL := os.Getenv("GEMINI_LIVE_URL")
 	if liveURL == "" {
 		liveURL = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent"
@@ -221,11 +371,8 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, apiKey string, hub 
 
 	geminiConn, _, err := websocket.DefaultDialer.Dial(geminiURL, header)
 	if err != nil {
-		log.Printf("Failed to connect to Gemini: %v", err)
-		return
+		return nil, err
 	}
-	defer geminiConn.Close()
-	fmt.Println("Conectado ao Gemini!")
 
 	modelName := os.Getenv("GEMINI_MODEL")
 	if modelName == "" {
@@ -235,9 +382,16 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, apiKey string, hub 
 	if voiceName == "" {
 		voiceName = "Puck"
 	}
-	systemInstruction := os.Getenv("GEMINI_SYSTEM_INSTRUCTION")
-	if systemInstruction == "" {
-		systemInstruction = "Você é o RoboEd, um robô divertido que explica tudo sobre a relação sobre inglês, matemática e tecnologia para alunos do ensino fundamental."
+	var systemInstruction string
+	promptBytes, err := os.ReadFile("system_prompt.md")
+	if err == nil {
+		systemInstruction = strings.TrimSpace(string(promptBytes))
+		fmt.Println("Sucesso: Prompt do sistema carregado de system_prompt.md")
+	} else {
+		systemInstruction = os.Getenv("GEMINI_SYSTEM_INSTRUCTION")
+		if systemInstruction == "" {
+			systemInstruction = "Você é o Bender, um robô divertido que explica tudo sobre o mundo da inteligência artificial de forma amigável e descontraída."
+		}
 	}
 
 	setupMsg := map[string]interface{}{
@@ -260,19 +414,49 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, apiKey string, hub 
 			},
 		},
 	}
+
 	if err := geminiConn.WriteJSON(setupMsg); err != nil {
-		log.Printf("Failed to send setup message: %v", err)
-		return
+		geminiConn.Close()
+		return nil, err
 	}
 
-	done := make(chan struct{})
+	fmt.Println("Conectado com sucesso ao Google Gemini Live!")
 
+	// Envia um "Olá!" automático solicitando a frase específica ao iniciar
+	initGreeting := map[string]interface{}{
+		"clientContent": map[string]interface{}{
+			"turns": []map[string]interface{}{
+				{
+					"role": "user",
+					"parts": []map[string]interface{}{
+						{"text": "Diga exatamente: 'Como posso ajudar?'"},
+					},
+				},
+			},
+			"turnComplete": true,
+		},
+	}
+	if err := geminiConn.WriteJSON(initGreeting); err != nil {
+		log.Printf("Aviso: Falha ao enviar saudação inicial ao Gemini: %v", err)
+	}
+
+	// Goroutine de leitura assíncrona do Gemini -> Cliente
 	go func() {
-		defer close(done)
 		for {
 			_, message, err := geminiConn.ReadMessage()
 			if err != nil {
-				log.Printf("Gemini receive error: %v", err)
+				log.Printf("Conexão do Gemini encerrada ou erro: %v. Revertendo para Escuta Ativa...", err)
+				mu.Lock()
+				*isGeminiActive = false
+				mu.Unlock()
+				clientConn.WriteJSON(map[string]string{
+					"type": "status",
+					"data": "Aguardando palavra de ativação...",
+				})
+				clientConn.WriteJSON(map[string]string{
+					"type": "wake_word_detected",
+					"data": "idle",
+				})
 				return
 			}
 
@@ -305,29 +489,5 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, apiKey string, hub 
 		}
 	}()
 
-	for {
-		_, message, err := clientConn.ReadMessage()
-		if err != nil {
-			break
-		}
-
-		var clientMsg map[string]string
-		if err := json.Unmarshal(message, &clientMsg); err != nil {
-			continue
-		}
-
-		if clientMsg["type"] == "audio" {
-			geminiInput := map[string]interface{}{
-				"realtimeInput": map[string]interface{}{
-					"audio": map[string]interface{}{
-						"data":     clientMsg["data"],
-						"mimeType": "audio/pcm;rate=16000",
-					},
-				},
-			}
-			if err := geminiConn.WriteJSON(geminiInput); err != nil {
-				break
-			}
-		}
-	}
+	return geminiConn, nil
 }

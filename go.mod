@@ -8,3 +8,5 @@ require (
 )
 
 require gocv.io/x/gocv v0.32.0
+
+require github.com/rajeshpachaikani/openWakeWord-go v0.0.0-20260225090525-1f2bce904366

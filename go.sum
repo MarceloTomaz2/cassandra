@@ -4,5 +4,7 @@ github.com/hybridgroup/mjpeg v0.0.0-20140228234708-4680f319790e/go.mod h1:eagM80
 github.com/joho/godotenv v1.5.1 h1:7eLL/+HRGLY0ldzfGMeQkb7vMd0as4CfYvUVzLqw0N0=
 github.com/joho/godotenv v1.5.1/go.mod h1:f4LDr5Voq0i2e/R5DDNOoa2zzDfwtkZa6DnEwAbqwq4=
 github.com/pascaldekloe/goe v0.1.0/go.mod h1:lzWF7FIEvWOWxwDKqyGYQf6ZUaNfKdP144TG7ZOy1lc=
+github.com/rajeshpachaikani/openWakeWord-go v0.0.0-20260225090525-1f2bce904366 h1:8854RTUFPOWNRxQZvFyPaT6rvZOCQFhZlrnP5TBJmY4=
+github.com/rajeshpachaikani/openWakeWord-go v0.0.0-20260225090525-1f2bce904366/go.mod h1:LuihIHUqo9rGnxRn1pi75XqgD4bhKkCwAVszcXAVdS4=
 gocv.io/x/gocv v0.32.0 h1:KPj/piKjLJQ0oKc0y0GFwTrnNX8zaK++118ereaYQkU=
 gocv.io/x/gocv v0.32.0/go.mod h1:oc6FvfYqfBp99p+yOEzs9tbYF9gOrAQSeL/dyIPefJU=

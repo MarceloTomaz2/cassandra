@@ -128,6 +128,9 @@ const statusDiv = document.querySelector('#status');
 
 const liveClient = new GeminiLiveClient(`${protocol}//${window.location.host}/ws`);
 
+const volumeMeter = document.querySelector('#volume-meter');
+const volumeBar = document.querySelector('#volume-bar');
+
 liveClient.onStatus = (status) => {
     statusDiv.innerText = status;
 };
@@ -144,22 +147,76 @@ liveClient.onText = (text) => {
     console.log("Gemini:", text);
 };
 
+liveClient.onVolumeChange = (volume) => {
+    if (volumeBar) {
+        volumeBar.style.width = volume + '%';
+    }
+};
+
 let isActive = false;
 micBtn.addEventListener('click', async () => {
     if (!isActive) {
         await liveClient.start();
-        micBtn.style.background = "rgba(255, 0, 0, 0.4)";
-        micBtn.innerText = "🛑 Parar Conversa";
+        micBtn.style.background = "rgba(0, 255, 0, 0.3)";
+        micBtn.innerText = "🛑 Desativar Escuta";
+        if (volumeMeter) volumeMeter.style.display = 'block';
         isActive = true;
     } else {
         liveClient.stopRecording();
         micBtn.style.background = "rgba(255, 255, 255, 0.2)";
-        micBtn.innerText = "🎙️ Falar com Bender";
+        micBtn.innerText = "🎙️ Ativar Escuta Ativa";
+        if (volumeMeter) volumeMeter.style.display = 'none';
+        if (volumeBar) volumeBar.style.width = '0%';
         isActive = false;
         isSpeaking = false;
-        statusDiv.innerText = "Clique para falar...";
+        statusDiv.innerText = "Clique para ativar...";
     }
 });
+
+function playNotificationSound(type) {
+    try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+
+        oscillator.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+
+        if (type === 'active') {
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5
+            gainNode.gain.setValueAtTime(0.08, audioCtx.currentTime);
+            oscillator.start();
+            oscillator.frequency.setValueAtTime(880, audioCtx.currentTime + 0.08); // A5
+            gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
+            oscillator.stop(audioCtx.currentTime + 0.32);
+        } else {
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(440, audioCtx.currentTime); // A4
+            gainNode.gain.setValueAtTime(0.08, audioCtx.currentTime);
+            oscillator.start();
+            oscillator.frequency.setValueAtTime(293.66, audioCtx.currentTime + 0.08); // D4
+            gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
+            oscillator.stop(audioCtx.currentTime + 0.32);
+        }
+    } catch (e) {
+        console.error("Erro ao reproduzir som de notificação:", e);
+    }
+}
+
+liveClient.onWakeWord = (state) => {
+    if (state === 'active') {
+        console.log("Wake word detectada! Bender ativado!");
+        micBtn.style.background = "rgba(255, 0, 0, 0.6)"; // Vermelho para modo conversa ativo!
+        micBtn.innerText = "🛑 Parar Conversa";
+        playNotificationSound('active');
+    } else {
+        console.log("Bender voltou ao modo de escuta ativa...");
+        micBtn.style.background = "rgba(0, 255, 0, 0.3)"; // Verde para escuta ativa aguardando
+        micBtn.innerText = "🛑 Desativar Escuta";
+        playNotificationSound('idle');
+    }
+};
 
 let blinkState = 0;
 let nextBlinkTime = Date.now() + Math.random() * 10000;

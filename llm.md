@@ -6,9 +6,10 @@ Welcome, AI Assistant! This document serves as a comprehensive system orientatio
 
 ## 📌 Project Overview
 **Cassandra** is a high-performance, real-time interactive 3D Web application that integrates:
-1.  **3D Graphics & Animations**: A 3D model of the robot **Bender** modeled in vanilla Three.js.
+1.  **3D Graphics & Animations**: A 3D model of the robot modeled in vanilla Three.js.
 2.  **Conversational Live Voice (Google Gemini Multimodal Live API)**: Bidirectional, low-latency voice-to-voice communication using WebSockets streaming raw PCM audio chunks.
 3.  **Real-Time Computer Vision & Face Tracking**: A backend Go service that grabs video frames from a camera feed, detects human faces using OpenCV (`CascadeClassifier`), and relays normalised coordinates to Three.js to move Bender's gaze and camera perspective in real-time.
+4.  **Local Deep-Learning Wake Word Detection**: A real-time keyword spotting engine running locally via Python (`openwakeword` + `onnxruntime` + custom ONNX models) bridged to Go through an isolated stdin/stdout pipe.
 
 ---
 
@@ -19,6 +20,8 @@ graph TD
     User([User in Browser]) <-->|WebAudio / ws| GoServer[Go Backend Server]
     GoServer <-->|Bidi WebSockets / PCM| GeminiLive[Gemini Live API]
     
+    GoServer <-->|stdin / stdout / PCM / DETECTED| PyWakeWord[Python openWakeWord Detector]
+    
     IPCamera[IP Camera / Webcam] -->|Video Feed| GoCVTracker[GoCV/OpenCV Face Tracker]
     GoCVTracker -->|Normalised Coordinates| GoServer
     GoServer -->|ws /events| User
@@ -26,21 +29,26 @@ graph TD
     User -->|Mouse fallback| ThreeJS[Three.js Camera / Eyes Gaze]
 ```
 
-1.  **Audio Pipeline**: User clicks "Falar com Bender" -> browser records microphone (PCM 16kHz, 16-bit mono) -> sends Base64 chunks over WebSocket (`/ws`) -> Go server relays to Gemini Live WebSocket (`v1alpha`) -> Gemini responds with PCM (24kHz, 16-bit mono) -> Go server relays to browser -> browser plays audio queue using AudioContext.
-2.  **Tracking Pipeline**: OpenCV processes feed -> calculates normalised center `(x, y)` between `-1.0` and `1.0` -> broadcasts over WebSocket `/events` -> Three.js updates camera position and robot mesh rotation.
+1.  **Wake Word Detection Pipeline**: User connects to WebSocket `/ws` -> backend starts an isolated `python wakeword_detector.py` subprocess -> browser streams 16kHz 16-bit PCM mono audio chunks -> Go server forwards PCM bytes directly to Python process's `stdin` -> `wakeword_detector.py` runs deep learning inference using local ONNX model -> once score exceeds threshold, Python outputs `DETECTED:<score>` to `stdout` -> Go server detects the signal, triggers the acoustic chime in the browser, and activates Gemini.
+2.  **Audio Pipeline (Active)**: Gemini Live connected -> Go server forwards client's incoming PCM directly to Gemini Live WebSocket (`v1alpha`) -> Gemini responds with PCM (24kHz, 16-bit mono) -> Go server relays to browser -> browser plays audio queue using AudioContext.
+3.  **Initiating Greeting**: Upon Gemini Live activation, the Go backend automatically injects a `clientContent` turn saying `"Diga exatamente: 'Como posso ajudar?'"`, prompting the model to start speaking immediately, reducing latency and eliminating initial silence.
+4.  **Tracking Pipeline**: OpenCV processes feed -> calculates normalised center `(x, y)` between `-1.0` and `1.0` -> broadcasts over WebSocket `/events` -> Three.js updates camera position and robot mesh rotation.
 
 ---
 
 ## 📁 Repository File Mapping
 
-*   **`main.go`**: Core HTTP server, WebSocket upgrader, and gateway routing `/ws` to Gemini and `/events` to the frontend.
+*   **`main.go`**: Core HTTP server, WebSocket upgrader, and gateway routing `/ws` to Gemini/WakeWord and `/events` to the frontend.
+*   **`wakeword_detector.py`**: Python script executing real-time openwakeword inference using ONNX Runtime.
+*   **`system_prompt.md`**: Dedicated markdown file storing the system prompt/personality of the robot, loaded dynamically on connection.
+*   **`models/`**: Centralized folder containing ONNX and TFLite wake word model files (e.g. `edna.onnx`, `ok_bender.onnx`).
 *   **`tracker.go`** (Build Tag `gocv`): Implements `FaceTracker` using native OpenCV bindings (`gocv.io/x/gocv`).
 *   **`tracker_mock.go`** (Build Tag `!gocv`): Fallback mock `FaceTracker` ensuring zero compile-time dependencies on OpenCV for quick local development.
 *   **`web/`**: Dedicated directory containing static frontend assets:
     *   `index.html`: Entry structure.
-    *   `main.js`: Main Three.js loop, camera physics, robot rendering, mesh blinking logic, and event listeners.
+    *   `main.js`: Main Three.js loop, camera physics, robot rendering, mesh blinking logic, local AudioContext chimes, and event listeners.
     *   `live_client.js`: Captures browser microphone feed and schedules incoming raw PCM audio playbacks.
-    *   `style.css`: Clean, dark UI styles.
+    *   `style.css`: Clean, modern styling.
     *   `ai_studio.js`: Standalone legacy helper for HTTP fallback.
 
 ---
@@ -82,6 +90,10 @@ GEMINI_LIVE_URL=wss://generativelanguage.googleapis.com/ws/google.ai.generativel
 GEMINI_MODEL=models/gemini-3.1-flash-live-preview
 GEMINI_VOICE_NAME=Puck                 # Voice options: Puck, Charon, Kore, Fenrir, Aoede
 GEMINI_SYSTEM_INSTRUCTION=You are Bender...
+
+# Wake Word Configuration
+WAKEWORD_MODEL_PATH=models/ok_bender.onnx
+WAKEWORD_THRESHOLD=0.8
 ```
 
 ---
@@ -112,6 +124,13 @@ GEMINI_SYSTEM_INSTRUCTION=You are Bender...
       "data": "Robot text transcription"
     }
     ```
+    WebSocket status triggers:
+    ```json
+    {
+      "type": "wake_word_detected",
+      "data": "active"  // 'active' or 'idle'
+    }
+    ```
 
 ### 2. Events Broadcast (`/events`)
 Sends real-time face coordinates:
@@ -133,3 +152,4 @@ Sends real-time face coordinates:
 4.  **Three.js Customisations**: Keep Bender's styling aligned with glassmorphism and modern colors. Coordinate scales should match target ranges:
     *   Horizontal coordinates: `-1.0` (Left) to `1.0` (Right).
     *   Vertical coordinates: `-1.0` (Bottom) to `1.0` (Top).
+5.  **Wake Word Model Management**: When updating the models, ensure they are placed inside the `models/` directory, and avoid creating files directly in the root namespace.
